@@ -1,475 +1,60 @@
-// ===============================
-// PrivateChat - Supabase frontend
-// ===============================
-// 1. Create a Supabase project.
-// 2. Run supabase.sql in Supabase SQL Editor.
-// 3. Enable Anonymous Sign-Ins in Authentication > Providers.
-// 4. Paste your project URL + anon key below.
-// Never put a Supabase service_role key in this file.
-
 const SUPABASE_URL = "https://ozgspkmzzgxjrsnjkqnx.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_0o2BZjcNGUMpItZyEdqjpA_N3vkYh8m";
-
-const configured = !SUPABASE_URL.includes("YOUR_") && !SUPABASE_ANON_KEY.includes("YOUR_");
-const sb = configured ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
-
-const $ = (id) => document.getElementById(id);
-const state = {
-  user: null,
-  profile: null,
-  rooms: [],
-  currentRoom: null,
-  channel: null,
-  invitationsChannel: null
-};
-
-document.addEventListener("DOMContentLoaded", async () => {
-  if (!configured) $("setupNotice").classList.remove("hidden");
-  bindEvents();
-  if (!configured) return;
-
-  const { data: { session } } = await sb.auth.getSession();
-  if (session?.user) {
-    state.user = session.user;
-    await loadProfile();
-  }
-});
-
-function bindEvents() {
-  $("usernameForm").addEventListener("submit", handleUsername);
-  $("newRoomBtn").addEventListener("click", showCreateRoom);
-  $("joinRoomBtn").addEventListener("click", showJoinRoom);
-  $("inviteBtn").addEventListener("click", showInvite);
-  $("roomInfoBtn").addEventListener("click", showRoomInfo);
-  $("messageForm").addEventListener("submit", sendMessage);
-  $("imageInput").addEventListener("change", sendImage);
-  $("roomSearch").addEventListener("input", renderRooms);
-  $("logoutBtn").addEventListener("click", signOut);
-  $("settingsBtn").addEventListener("click", showSettings);
-  $("mobileBackBtn").addEventListener("click", () => $("appView").classList.remove("mobile-chat"));
-  $("closeModal").addEventListener("click", closeModal);
-  $("modalBackdrop").addEventListener("click", (e) => {
-    if (e.target === $("modalBackdrop")) closeModal();
-  });
+const configured=!SUPABASE_URL.includes("YOUR_")&&!SUPABASE_ANON_KEY.includes("YOUR_");
+const sb=configured?supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY):null;
+const $=id=>document.getElementById(id),S={user:null,profile:null,rooms:[],room:null,channel:null,inviteChannel:null,presence:null,typingTimer:null,reply:null,editing:null};
+addEventListener("DOMContentLoaded",async()=>{if(!configured)$("setupNotice").classList.remove("hidden");bind();if(!configured)return;const {data:{session}}=await sb.auth.getSession();if(session){S.user=session.user;await profile()}sb.auth.onAuthStateChange(async(_,s)=>{if(s&&!S.profile){S.user=s.user;await profile()}})});
+function bind(){$("googleBtn").onclick=google;$('usernameForm').onsubmit=anon;$('setupForm').onsubmit=saveUser;$('newRoomBtn').onclick=createRoomUI;$('joinRoomBtn').onclick=joinRoomUI;$('inviteBtn').onclick=inviteUI;$('infoBtn').onclick=infoUI; $('searchBtn')?.addEventListener('click',searchUI); $('messageInput').addEventListener('input',typing);$('composer').onsubmit=sendText;$('mediaInput').onchange=uploadMedia;$('roomSearch').oninput=roomsUI;$('logoutBtn').onclick=()=>sb.auth.signOut().then(()=>location.reload());$('settingsBtn').onclick=()=>{modal(`<h3>Account</h3><p>You are <b>@${esc(S.profile.username)}</b>.</p><label>Display name</label><input id='dn' value='${esc(S.profile.display_name||'')}'><label>Bio</label><input id='bio' value='${esc(S.profile.bio||'')}'><button id='savep' class='primary' style='margin-top:10px'>Save</button><button id='notify' class='secondary' style='margin-top:8px'>Enable notifications</button>`);$('savep').onclick=async()=>{const r=await sb.from('profiles').update({display_name:$('dn').value.trim(),bio:$('bio').value.trim()}).eq('id',S.user.id);if(r.error)toast(r.error.message,true);else{close();toast('Profile saved.')}};$('notify').onclick=async()=>{if('Notification' in window){const p=await Notification.requestPermission();toast(p==='granted'?'Notifications enabled.':'Notifications not enabled.')}}};$('backBtn').onclick=()=>$('appView').classList.remove('mobile-chat');$('closeModal').onclick=close;$('modalBackdrop').onclick=e=>{if(e.target===$('modalBackdrop'))close()}}
+async function google(){const {error}=await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin}});if(error)$("loginError").textContent=error.message}
+async function anon(e){e.preventDefault();const u=$('usernameInput').value.trim().toLowerCase();if(!/^[a-z0-9_.]{3,24}$/.test(u))return $('loginError').textContent='Invalid username.';const {data,error}=await sb.auth.signInAnonymously();if(error)return $('loginError').textContent=error.message;S.user=data.user;const r=await sb.from('profiles').insert({id:S.user.id,username:u});if(r.error){await sb.auth.signOut();return $('loginError').textContent=r.error.code==='23505'?'Username already taken.':'Could not create profile.'}profile()}
+async function profile(){const {data,error}=await sb.from('profiles').select('*').eq('id',S.user.id).maybeSingle();if(error)return toast(error.message,true);if(!data){$('loginView').classList.add('hidden');$('setupView').classList.remove('hidden');return}S.profile=data;$('loginView').classList.add('hidden');$('setupView').classList.add('hidden');$('appView').classList.remove('hidden');$('myUsername').textContent='@'+data.username;invites();loadRooms()}
+async function saveUser(e){e.preventDefault();const u=$('setupUsername').value.trim().toLowerCase();if(!/^[a-z0-9_.]{3,24}$/.test(u))return $('setupError').textContent='Invalid username.';const {data,error}=await sb.from('profiles').insert({id:S.user.id,username:u}).select().single();if(error)return $('setupError').textContent=error.code==='23505'?'Username already taken.':error.message;S.profile=data;profile()}
+async function loadRooms(){const {data,error}=await sb.from('room_members').select('room_id,rooms(id,name,code,created_by)').eq('user_id',S.user.id);if(error)return toast(error.message,true);S.rooms=(data||[]).map(x=>x.rooms).filter(Boolean);roomsUI()}
+function roomsUI(){const q=$('roomSearch').value.toLowerCase(),l=$('roomList');l.innerHTML='';S.rooms.filter(r=>r.name.toLowerCase().includes(q)).forEach(r=>{const n=$('roomTemplate').content.cloneNode(true),b=n.querySelector('.room-row');b.classList.toggle('active',S.room?.id===r.id);n.querySelector('.room-row-name').textContent=r.name;b.onclick=()=>openRoom(r);l.appendChild(n)})}
+async function openRoom(r){S.room=r;roomsUI();$('appView').classList.add('mobile-chat');$('emptyChat').classList.add('hidden');$('messageArea').classList.remove('hidden');$('composer').classList.remove('hidden');$('inviteBtn').disabled=$('infoBtn').disabled=false;$('roomTitle').textContent=r.name;$('roomMeta').textContent='Room '+r.code;await messages();subscribe();presence()}
+async function messages(){const {data,error}=await sb.from('messages').select('id,room_id,sender_id,body,media_id,created_at,profiles(username),media(id,file_path,media_type,view_limit,view_count)').eq('room_id',S.room.id).order('created_at');if(error)return toast(error.message,true);$('messageArea').innerHTML='';(data||[]).forEach(message);scroll()}
+function subscribe(){if(S.channel)sb.removeChannel(S.channel);S.channel=sb.channel('room-'+S.room.id).on('postgres_changes',{event:'INSERT',schema:'public',table:'messages',filter:'room_id=eq.'+S.room.id},async p=>{const {data:u}=await sb.from('profiles').select('username').eq('id',p.new.sender_id).single();let m=null;if(p.new.media_id){const r=await sb.from('media').select('*').eq('id',p.new.media_id).single();m=r.data}message({...p.new,profiles:u,media:m});scroll()}).subscribe()}
+function message(m){
+ const wrap=document.createElement('div');wrap.className='message'+(m.sender_id===S.user.id?' mine':'');wrap.dataset.id=m.id;
+ const sender=document.createElement('div');sender.className='sender';sender.textContent=m.sender_id===S.user.id?'You':'@'+(m.profiles?.username||'user');
+ const b=document.createElement('div');b.className='bubble';
+ if(m.reply_to){const q=document.createElement('div');q.className='quoted';q.textContent='↪ Reply';b.append(q)}
+ if(m.body){const t=document.createElement('div');t.textContent=m.body;b.append(t)}
+ if(m.media){const c=document.createElement('div');c.className='media-card';let rem=m.media.view_limit===0?'Unlimited':Math.max(0,m.media.view_limit-m.media.view_count);const btn=document.createElement('button');btn.textContent=rem===0?'Media expired':`📎 ${rem} view${rem==='Unlimited'||rem>1?'s':''} remaining • Open`;btn.disabled=rem===0;btn.onclick=()=>openMedia(m.media,btn);c.append(btn);b.append(c)}
+ const time=document.createElement('span');time.className='time';time.textContent=new Date(m.created_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})+(m.edited_at?' · edited':'');b.append(time);
+ const actions=document.createElement('div');actions.className='msg-actions';
+ const add=(t,fn)=>{const x=document.createElement('button');x.textContent=t;x.onclick=fn;actions.append(x)};
+ add('↩',()=>{S.reply=m;$('replyBar')?.classList.remove('hidden');if($('replyBar'))$('replyBar').textContent='Replying to @'+(m.profiles?.username||'user');$('messageInput').focus()});
+ add('♥',async()=>{const r=await sb.from('message_reactions').upsert({message_id:m.id,user_id:S.user.id,reaction:'❤️'},{onConflict:'message_id,user_id'});if(r.error)toast(r.error.message,true)});
+ if(m.sender_id===S.user.id){add('✎',()=>{S.editing=m;$('messageInput').value=m.body||'';$('messageInput').focus();$('replyBar')?.classList.remove('hidden');if($('replyBar'))$('replyBar').textContent='Editing message'});add('×',async()=>{if(confirm('Delete this message?')){const r=await sb.from('messages').delete().eq('id',m.id).eq('sender_id',S.user.id);if(r.error)toast(r.error.message,true);else messages()}})}
+ wrap.append(sender,b,actions);$('messageArea').append(wrap)
 }
-
-async function handleUsername(e) {
-  e.preventDefault();
-  if (!configured) return;
-  const username = $("usernameInput").value.trim().toLowerCase();
-  $("authError").textContent = "";
-
-  if (!/^[a-z0-9_.]{3,24}$/.test(username)) {
-    $("authError").textContent = "Use 3–24 letters, numbers, underscore or dot.";
-    return;
-  }
-
-  try {
-    setBusy(e.target, true);
-    const { data, error } = await sb.auth.signInAnonymously();
-    if (error) throw error;
-    state.user = data.user;
-
-    const { error: profileError } = await sb.from("profiles").insert({
-      id: state.user.id,
-      username
-    });
-    if (profileError) {
-      if (profileError.code === "23505") {
-        await sb.auth.signOut();
-        $("authError").textContent = "That username is already taken. Pick another one.";
-      } else {
-        throw profileError;
-      }
-      return;
-    }
-
-    await loadProfile();
-  } catch (err) {
-    $("authError").textContent = friendlyError(err);
-  } finally {
-    setBusy(e.target, false);
-  }
+async function openMedia(m,btn){btn.disabled=true;btn.textContent='Opening…';const {data,error}=await sb.functions.invoke('open-media',{body:{media_id:m.id}});if(error||!data?.url){btn.disabled=false;btn.textContent=data?.remaining===0?'Expired':'Unavailable';return toast(error?.message||'Media unavailable.',true)}const w=open('','_blank','noopener');if(!w){btn.disabled=false;return btn.textContent='Allow popups'}const u=esc(data.url);w.document.write(`<style>body{margin:0;background:#000;display:grid;place-items:center;height:100vh}img,video{max-width:100%;max-height:100%}</style>${m.media_type.startsWith('video')?`<video src="${u}" controls autoplay></video>`:`<img src="${u}">`}`);btn.textContent=data.remaining===null?'Unlimited':`${data.remaining} view${data.remaining===1?'':'s'} remaining`;if(data.remaining===0)btn.disabled=true}
+async function sendText(e){
+ e.preventDefault();const v=$('messageInput').value.trim();if(!v||!S.room)return;$('messageInput').value='';
+ if(S.editing){const r=await sb.from('messages').update({body:v,edited_at:new Date().toISOString()}).eq('id',S.editing.id).eq('sender_id',S.user.id);S.editing=null;if(r.error)toast(r.error.message,true);else messages();return}
+ const row={room_id:S.room.id,sender_id:S.user.id,body:v};if(S.reply)row.reply_to=S.reply.id;
+ S.reply=null;$('replyBar')?.classList.add('hidden');const {error}=await sb.from('messages').insert(row);if(error)toast(error.message,true)
 }
+async function uploadMedia(e){const f=e.target.files?.[0];e.target.value='';if(!f||!S.room)return;if(f.size>50*1024*1024)return toast('Maximum media size is 50 MB.',true);if(!f.type.startsWith('image/')&&!f.type.startsWith('video/'))return toast('Only photos and videos are supported.',true);const path=`${S.user.id}/${crypto.randomUUID()}-${f.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;const up=await sb.storage.from('chat-media').upload(path,f,{contentType:f.type});if(up.error)return toast(up.error.message,true);const {data:m,error}=await sb.from('media').insert({room_id:S.room.id,sender_id:S.user.id,file_path:path,media_type:f.type,view_limit:+$('viewLimit').value}).select().single();if(error)return toast(error.message,true);const r=await sb.from('messages').insert({room_id:S.room.id,sender_id:S.user.id,media_id:m.id});if(r.error)toast(r.error.message,true)}
 
-async function loadProfile() {
-  const { data, error } = await sb.from("profiles").select("*").eq("id", state.user.id).single();
-  if (error) {
-    $("authError").textContent = friendlyError(error);
-    return;
-  }
-  state.profile = data;
-  $("myUsername").textContent = "@" + data.username;
-  $("authView").classList.add("hidden");
-  $("appView").classList.remove("hidden");
-  subscribeToInvites();
-  await loadRooms();
+function presence(){
+ if(S.presence)sb.removeChannel(S.presence);
+ S.presence=sb.channel('presence-'+S.room.id,{config:{presence:{key:S.user.id}}})
+ .on('presence',{event:'sync'},()=>{const p=S.presence.presenceState();$('roomMeta').textContent='Room '+S.room.code+' • '+Object.keys(p).length+' online'})
+ .subscribe(async st=>{if(st==='SUBSCRIBED')await S.presence.track({username:S.profile.username,typing:false})})
 }
-
-async function loadRooms() {
-  const { data, error } = await sb
-    .from("room_members")
-    .select("room_id, rooms(id, name, code, created_at)")
-    .eq("user_id", state.user.id)
-    .order("joined_at", { ascending: false });
-
-  if (error) return toast(friendlyError(error), true);
-
-  state.rooms = (data || []).map(x => x.rooms).filter(Boolean);
-  renderRooms();
+function typing(){
+ if(!S.presence)return;S.presence.track({username:S.profile.username,typing:true});clearTimeout(S.typingTimer);
+ S.typingTimer=setTimeout(()=>S.presence.track({username:S.profile.username,typing:false}),1200)
 }
-
-function renderRooms() {
-  const q = $("roomSearch").value.toLowerCase();
-  const list = $("roomList");
-  list.innerHTML = "";
-  const rooms = state.rooms.filter(r => r.name.toLowerCase().includes(q));
-
-  if (!rooms.length) {
-    list.innerHTML = `<div style="padding:18px;color:var(--muted);font-size:13px">No rooms yet.</div>`;
-    return;
-  }
-
-  const tpl = $("roomTemplate");
-  rooms.forEach(room => {
-    const node = tpl.content.cloneNode(true);
-    const row = node.querySelector(".room-row");
-    row.classList.toggle("active", state.currentRoom?.id === room.id);
-    node.querySelector(".room-row-name").textContent = room.name;
-    node.querySelector(".room-row-preview").textContent = "Private room";
-    row.addEventListener("click", () => openRoom(room));
-    list.appendChild(node);
-  });
+function searchUI(){
+ modal(`<h3>Search messages</h3><form id="sf"><input id="sq" placeholder="Search this room" required><button class="primary">Search</button></form><div id="sr"></div>`);
+ $('sf').onsubmit=async e=>{e.preventDefault();const q=$('sq').value.trim();const r=await sb.from('messages').select('body,created_at,profiles(username)').eq('room_id',S.room.id).ilike('body',`%${q}%`).order('created_at',{ascending:false}).limit(50);$('sr').innerHTML=r.error?esc(r.error.message):(r.data||[]).map(x=>`<div class="search-result"><b>@${esc(x.profiles?.username||'user')}</b><br>${esc(x.body||'Media')}</div>`).join('')||'<p class="muted">No results.</p>'}
 }
-
-async function openRoom(room) {
-  state.currentRoom = room;
-  renderRooms();
-  $("appView").classList.add("mobile-chat");
-  $("emptyChat").classList.add("hidden");
-  $("messageArea").classList.remove("hidden");
-  $("messageForm").classList.remove("hidden");
-  $("inviteBtn").disabled = false;
-  $("roomInfoBtn").disabled = false;
-  $("roomTitle").textContent = room.name;
-  $("roomMeta").textContent = "Room " + room.code;
-  $("roomAvatar").textContent = "#";
-  await loadMessages();
-  subscribeToMessages();
-}
-
-async function loadMessages() {
-  const area = $("messageArea");
-  area.innerHTML = `<div class="muted" style="text-align:center">Loading messages…</div>`;
-
-  const { data, error } = await sb
-    .from("messages")
-    .select("id, room_id, sender_id, body, image_url, created_at, profiles(username)")
-    .eq("room_id", state.currentRoom.id)
-    .order("created_at", { ascending: true })
-    .limit(500);
-
-  if (error) {
-    area.innerHTML = `<div class="error" style="text-align:center">${escapeHtml(friendlyError(error))}</div>`;
-    return;
-  }
-
-  area.innerHTML = "";
-  (data || []).forEach(renderMessage);
-  scrollMessages();
-}
-
-function subscribeToMessages() {
-  if (state.channel) sb.removeChannel(state.channel);
-  state.channel = sb
-    .channel("room-" + state.currentRoom.id)
-    .on("postgres_changes", {
-      event: "INSERT", schema: "public", table: "messages",
-      filter: "room_id=eq." + state.currentRoom.id
-    }, async (payload) => {
-      const { data } = await sb.from("profiles").select("username").eq("id", payload.new.sender_id).single();
-      renderMessage({...payload.new, profiles: data});
-      scrollMessages();
-    })
-    .subscribe();
-}
-
-function renderMessage(m) {
-  const mine = m.sender_id === state.user.id;
-  const wrap = document.createElement("div");
-  wrap.className = "message" + (mine ? " mine" : "");
-
-  const sender = document.createElement("div");
-  sender.className = "sender";
-  sender.textContent = mine ? "You" : "@" + (m.profiles?.username || "user");
-
-  const bubble = document.createElement("div");
-  bubble.className = "bubble";
-
-  if (m.body) {
-    const text = document.createElement("div");
-    text.textContent = m.body;
-    bubble.appendChild(text);
-  }
-  if (m.image_url) {
-    const img = document.createElement("img");
-    img.src = m.image_url;
-    img.alt = "Shared image";
-    img.loading = "lazy";
-    img.addEventListener("click", () => window.open(m.image_url, "_blank", "noopener"));
-    bubble.appendChild(img);
-  }
-
-  const time = document.createElement("span");
-  time.className = "time";
-  time.textContent = formatTime(m.created_at);
-  bubble.appendChild(time);
-
-  wrap.append(sender, bubble);
-  $("messageArea").appendChild(wrap);
-}
-
-async function sendMessage(e) {
-  e.preventDefault();
-  if (!state.currentRoom) return;
-  const input = $("messageInput");
-  const body = input.value.trim();
-  if (!body) return;
-
-  input.value = "";
-  const { error } = await sb.from("messages").insert({
-    room_id: state.currentRoom.id,
-    sender_id: state.user.id,
-    body
-  });
-  if (error) {
-    input.value = body;
-    toast(friendlyError(error), true);
-  }
-}
-
-async function sendImage(e) {
-  const file = e.target.files?.[0];
-  e.target.value = "";
-  if (!file || !state.currentRoom) return;
-  if (file.size > 8 * 1024 * 1024) {
-    toast("Images must be 8 MB or smaller.", true);
-    return;
-  }
-
-  try {
-    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-    const path = `${state.user.id}/${crypto.randomUUID()}.${ext}`;
-    const { error: uploadError } = await sb.storage.from("chat-images").upload(path, file, {
-      contentType: file.type,
-      upsert: false
-    });
-    if (uploadError) throw uploadError;
-
-    const { data: publicData } = sb.storage.from("chat-images").getPublicUrl(path);
-    const { error } = await sb.from("messages").insert({
-      room_id: state.currentRoom.id,
-      sender_id: state.user.id,
-      image_url: publicData.publicUrl
-    });
-    if (error) throw error;
-  } catch (err) {
-    toast(friendlyError(err), true);
-  }
-}
-
-function showCreateRoom() {
-  openModal(`
-    <h3>Create a private room</h3>
-    <p>Give the room a name. A unique room code will be generated automatically.</p>
-    <form id="createRoomForm">
-      <label>Room name</label>
-      <input id="newRoomName" maxlength="40" placeholder="e.g. Friends" required>
-      <button class="primary" type="submit">Create room</button>
-    </form>
-  `);
-  $("createRoomForm").addEventListener("submit", createRoom);
-}
-
-async function createRoom(e) {
-  e.preventDefault();
-  const name = $("newRoomName").value.trim();
-  if (!name) return;
-
-  const { data, error } = await sb.rpc("create_room", { room_name: name });
-  if (error) return toast(friendlyError(error), true);
-  closeModal();
-  await loadRooms();
-  const room = state.rooms.find(r => r.id === data);
-  if (room) openRoom(room);
-}
-
-function showJoinRoom() {
-  openModal(`
-    <h3>Join a room</h3>
-    <p>Ask your friend for their 8-character room code.</p>
-    <form id="joinRoomForm">
-      <label>Room code</label>
-      <input id="roomCodeInput" maxlength="8" style="text-transform:uppercase;letter-spacing:.15em" placeholder="AB12CD34" required>
-      <button class="primary" type="submit">Join room</button>
-    </form>
-  `);
-  $("joinRoomForm").addEventListener("submit", joinRoom);
-}
-
-async function joinRoom(e) {
-  e.preventDefault();
-  const code = $("roomCodeInput").value.trim().toUpperCase();
-  const { data, error } = await sb.rpc("join_room_by_code", { room_code_input: code });
-  if (error) return toast(friendlyError(error), true);
-  closeModal();
-  await loadRooms();
-  const room = state.rooms.find(r => r.id === data);
-  if (room) openRoom(room);
-}
-
-function showInvite() {
-  if (!state.currentRoom) return;
-  openModal(`
-    <h3>Invite someone</h3>
-    <p>Share the room code, or send a private invite to a username.</p>
-    <div class="code">${escapeHtml(state.currentRoom.code)}</div>
-    <button id="copyCode" class="secondary" style="width:100%">Copy room code</button>
-    <form id="inviteForm">
-      <label>Friend's username</label>
-      <input id="inviteUsername" maxlength="24" placeholder="@username" required>
-      <button class="primary" type="submit">Send private invite</button>
-    </form>
-    <p id="inviteResult"></p>
-  `);
-  $("copyCode").addEventListener("click", async () => {
-    await navigator.clipboard.writeText(state.currentRoom.code);
-    $("copyCode").textContent = "Copied!";
-  });
-  $("inviteForm").addEventListener("submit", sendInvite);
-}
-
-async function sendInvite(e) {
-  e.preventDefault();
-  const username = $("inviteUsername").value.trim().replace(/^@/, "").toLowerCase();
-  const { data: target, error: findError } = await sb.from("profiles").select("id, username").eq("username", username).maybeSingle();
-  if (findError) return toast(friendlyError(findError), true);
-  if (!target) {
-    $("inviteResult").textContent = "No user with that username exists yet.";
-    return;
-  }
-  if (target.id === state.user.id) {
-    $("inviteResult").textContent = "That's your own username.";
-    return;
-  }
-
-  const { error } = await sb.from("room_invites").upsert({
-    room_id: state.currentRoom.id,
-    inviter_id: state.user.id,
-    invitee_id: target.id
-  }, { onConflict: "room_id,invitee_id" });
-
-  $("inviteResult").textContent = error ? friendlyError(error) : "Invite sent to @" + target.username + ".";
-}
-
-function subscribeToInvites() {
-  if (state.invitationsChannel) sb.removeChannel(state.invitationsChannel);
-  state.invitationsChannel = sb
-    .channel("invites-" + state.user.id)
-    .on("postgres_changes", {
-      event: "INSERT", schema: "public", table: "room_invites",
-      filter: "invitee_id=eq." + state.user.id
-    }, async (payload) => {
-      const { data: room } = await sb.from("rooms").select("*").eq("id", payload.new.room_id).single();
-      const { data: inviter } = await sb.from("profiles").select("username").eq("id", payload.new.inviter_id).single();
-      if (room) showIncomingInvite(room, inviter?.username || "someone");
-    })
-    .subscribe();
-}
-
-function showIncomingInvite(room, inviter) {
-  openModal(`
-    <h3>New room invite</h3>
-    <p><strong>@${escapeHtml(inviter)}</strong> invited you to <strong>${escapeHtml(room.name)}</strong>.</p>
-    <p>Room code: <strong>${escapeHtml(room.code)}</strong></p>
-    <div style="display:flex;gap:8px">
-      <button id="acceptInvite" class="primary" style="flex:1">Join room</button>
-      <button id="declineInvite" class="secondary">Close</button>
-    </div>
-  `);
-  $("acceptInvite").addEventListener("click", async () => {
-    const { error } = await sb.rpc("join_room_by_code", { room_code_input: room.code });
-    if (error) return toast(friendlyError(error), true);
-    await sb.from("room_invites").delete().eq("id", room.id).eq("invitee_id", state.user.id);
-    closeModal();
-    await loadRooms();
-    const joined = state.rooms.find(r => r.id === room.id);
-    if (joined) openRoom(joined);
-  });
-  $("declineInvite").addEventListener("click", closeModal);
-}
-
-async function showRoomInfo() {
-  if (!state.currentRoom) return;
-  const { data, error } = await sb
-    .from("room_members")
-    .select("user_id, profiles(username)")
-    .eq("room_id", state.currentRoom.id);
-  if (error) return toast(friendlyError(error), true);
-
-  const members = (data || []).map(m => `<div class="member"><span>@${escapeHtml(m.profiles?.username || "user")}</span>${m.user_id === state.user.id ? "<small>You</small>" : ""}</div>`).join("");
-  openModal(`
-    <h3>${escapeHtml(state.currentRoom.name)}</h3>
-    <p>Share this code with anyone you want to let into the room.</p>
-    <div class="code">${escapeHtml(state.currentRoom.code)}</div>
-    <h4>Members</h4>
-    <div class="member-list">${members || "<p>No members.</p>"}</div>
-  `);
-}
-
-function showSettings() {
-  openModal(`
-    <h3>Your account</h3>
-    <p>Your username is <strong>@${escapeHtml(state.profile.username)}</strong>.</p>
-    <p>This starter keeps usernames permanent for the anonymous account. If you need username changes later, add an account system (email/password or OAuth) rather than relying on browser storage.</p>
-  `);
-}
-
-async function signOut() {
-  await sb.auth.signOut();
-  location.reload();
-}
-
-function openModal(html) {
-  $("modalContent").innerHTML = html;
-  $("modalBackdrop").classList.remove("hidden");
-}
-function closeModal() {
-  $("modalBackdrop").classList.add("hidden");
-  $("modalContent").innerHTML = "";
-}
-function scrollMessages() {
-  const area = $("messageArea");
-  area.scrollTop = area.scrollHeight;
-}
-function formatTime(iso) {
-  return new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" }).format(new Date(iso));
-}
-function setBusy(form, busy) {
-  const button = form.querySelector("button[type=submit]");
-  if (button) button.disabled = busy;
-}
-function friendlyError(err) {
-  return err?.message || "Something went wrong.";
-}
-function toast(message, error = false) {
-  // Lightweight notification without a dependency.
-  const el = document.createElement("div");
-  el.textContent = message;
-  el.style.cssText = `position:fixed;right:18px;bottom:18px;z-index:99;padding:12px 15px;border-radius:10px;background:${error ? "#7f1d1d" : "#1e293b"};color:white;box-shadow:0 12px 30px rgba(0,0,0,.3);max-width:360px`;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 3500);
-}
-function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;" }[c]));
-}
+function createRoomUI(){modal(`<h3>Create room</h3><p>You become the owner and can remove members.</p><form id="f"><input id="rn" maxlength="40" required placeholder="Room name"><button class="primary">Create</button></form>`);$('f').onsubmit=async e=>{e.preventDefault();const {data,error}=await sb.rpc('create_room',{room_name:$('rn').value.trim()});if(error)return toast(error.message,true);close();await loadRooms();openRoom(S.rooms.find(r=>r.id===data))}}
+function joinRoomUI(){modal(`<h3>Join room</h3><form id="f"><input id="rc" maxlength="8" required placeholder="AB12CD34"><button class="primary">Join</button></form>`);$('f').onsubmit=async e=>{e.preventDefault();const {data,error}=await sb.rpc('join_room_by_code',{room_code_input:$('rc').value.trim().toUpperCase()});if(error)return toast(error.message,true);close();await loadRooms();openRoom(S.rooms.find(r=>r.id===data))}}
+function inviteUI(){modal(`<h3>Invite</h3><p>Room code</p><div class="code">${esc(S.room.code)}</div><button id="copy" class="secondary" style="width:100%">Copy code</button><form id="f"><input id="iu" placeholder="@username" required><button class="primary">Send invite</button></form><p id="ir"></p>`);$('copy').onclick=async()=>{await navigator.clipboard.writeText(S.room.code);$('copy').textContent='Copied!'};$('f').onsubmit=async e=>{e.preventDefault();const u=$('iu').value.trim().replace(/^@/,'').toLowerCase();const {data:x,error}=await sb.from('profiles').select('id,username').eq('username',u).maybeSingle();if(error)return $('ir').textContent=error.message;if(!x)return $('ir').textContent='Username not found.';const r=await sb.from('room_invites').upsert({room_id:S.room.id,inviter_id:S.user.id,invitee_id:x.id},{onConflict:'room_id,invitee_id'});$('ir').textContent=r.error?r.error.message:'Invite sent.'}}
+async function infoUI(){const {data,error}=await sb.from('room_members').select('user_id,profiles(username)').eq('room_id',S.room.id);if(error)return toast(error.message,true);const owner=S.room.created_by===S.user.id;modal(`<h3>${esc(S.room.name)}</h3><div class="code">${esc(S.room.code)}</div><p>Members</p><div class="member-list">${(data||[]).map(m=>`<div class="member"><span>@${esc(m.profiles?.username||'user')} ${m.user_id===S.room.created_by?'<small>owner</small>':''}</span>${owner&&m.user_id!==S.user.id?`<button class="danger small" data-rm="${m.user_id}">Remove</button>`:''}</div>`).join('')}</div>`);document.querySelectorAll('[data-rm]').forEach(b=>b.onclick=async()=>{if(!confirm('Remove this member?'))return;const r=await sb.rpc('remove_room_member',{room_id_input:S.room.id,user_id_input:b.dataset.rm});if(r.error)return toast(r.error.message,true);await loadRooms();await infoUI()})}
+function invites(){if(S.inviteChannel)sb.removeChannel(S.inviteChannel);S.inviteChannel=sb.channel('inv-'+S.user.id).on('postgres_changes',{event:'INSERT',schema:'public',table:'room_invites',filter:'invitee_id=eq.'+S.user.id},async p=>{const {data:r}=await sb.from('rooms').select('*').eq('id',p.new.room_id).single();const {data:u}=await sb.from('profiles').select('username').eq('id',p.new.inviter_id).single();if(r){modal(`<h3>Room invite</h3><p>@${esc(u?.username||'someone')} invited you to ${esc(r.name)}.</p><button id="accept" class="primary" style="width:100%">Join</button>`);$('accept').onclick=async()=>{const x=await sb.rpc('join_room_by_code',{room_code_input:r.code});if(x.error)return toast(x.error.message,true);close();await loadRooms();openRoom(S.rooms.find(q=>q.id===r.id))}}}).subscribe()}
+function modal(x){$('modalContent').innerHTML=x;$('modalBackdrop').classList.remove('hidden')}function close(){$('modalBackdrop').classList.add('hidden');$('modalContent').innerHTML=''}function scroll(){$('messageArea').scrollTop=$('messageArea').scrollHeight}function toast(m,e=false){const x=document.createElement('div');x.textContent=m;x.style.cssText=`position:fixed;right:18px;bottom:18px;background:${e?'#7f1d1d':'#1e293b'};padding:12px 15px;border-radius:10px;z-index:99`;document.body.append(x);setTimeout(()=>x.remove(),3000)}function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}

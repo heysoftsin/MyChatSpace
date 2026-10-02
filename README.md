@@ -1,89 +1,79 @@
-# PrivateChat
+# PrivateChat v2
 
-A small Telegram/WhatsApp-style private chat website designed to deploy as a static site on **Netlify or GitHub Pages** with **Supabase** providing authentication, realtime database, and image storage.
+This version adds:
 
-## Features
+- Google account login through Supabase Auth
+- Globally unique usernames
+- Room owner/admin status
+- Owner-only member removal
+- Username invites + room codes
+- Realtime text chat
+- Photo and video sharing
+- 1-view, 2-view, or unlimited media
+- Private Storage bucket
+- Server-side view consumption
+- Mobile-friendly UI
 
-- One-time username selection
-- Private rooms
-- Unique 8-character room codes
-- Join a room with a code
-- Invite/ping another user by username
-- Realtime text messages
-- Image sharing
-- Mobile-friendly layout
-- No custom server required
-- Static frontend suitable for Netlify/GitHub Pages
+## Supabase setup
 
-## 1. Create Supabase
+### Google login
+In Supabase go to **Authentication → Providers → Google** and enable Google.
+Create/configure your Google OAuth credentials there. Add your deployed Netlify/GitHub URL to Supabase's Auth redirect URLs.
 
-Create a free Supabase project.
+The username-only button is only a testing convenience and uses anonymous authentication. For a real deployment, use Google login so users can recover their account and use it on multiple devices.
 
-In **Authentication → Providers**, enable **Anonymous Sign-Ins**.
+### Database
+Run `supabase.sql` in Supabase SQL Editor.
 
-Then open **SQL Editor** and run all of `supabase.sql`.
+The new SQL uses `is_room_member()` as a `security definer` helper, so it avoids the `infinite recursion detected in policy for relation "room_members"` error from the earlier version.
 
-## 2. Connect the frontend
-
-Open `app.js` and replace:
+### Frontend
+In `app.js` set:
 
 ```js
-const SUPABASE_URL = "YOUR_SUPABASE_URL";
-const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+const SUPABASE_URL = "https://YOUR_PROJECT.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR_ANON_OR_PUBLISHABLE_KEY";
 ```
 
-with your project's URL and **anon/publishable key**.
+Never put a `service_role`/secret key in browser code.
 
-Do NOT use the Supabase `service_role`/secret key in browser code.
+## One/two-view media
 
-You can find these in your Supabase project's API settings.
+The bucket is private. A database function atomically increments `view_count` and refuses additional opens after the configured limit. The Edge Function then creates a **60-second signed URL** using the service-role key, which stays server-side.
 
-## 3. Test locally
+Deploy the Edge Function as `open-media` and make sure the Edge Function environment has the standard Supabase variables plus `SUPABASE_SERVICE_ROLE_KEY`.
 
-Because the browser may restrict some functionality when opening `index.html` directly, use a local server.
-
-For Python:
+With Supabase CLI, from this project:
 
 ```bash
-python -m http.server 8000
+supabase functions deploy open-media
 ```
 
-Then visit:
+Do not commit a service-role key into this repository. Supabase supplies it to the deployed function as a secret/environment variable.
 
-`http://localhost:8000`
+## Deploy the website
 
-## 4. Deploy to Netlify
+Netlify/GitHub Pages only need the static files. No frontend build command is required.
 
-Drag the project folder into Netlify Drop, or connect the GitHub repository.
+For Netlify, upload/connect the folder and publish `.`.
 
-No build command is required.
+## Security note
 
-Publish directory:
+A 1-view media setting controls access through this application's server-side media endpoint. It cannot prevent screenshots, screen recording, or someone photographing the screen.
 
-`.`
+This is still not end-to-end encryption like Signal: the Supabase project/database administrators can access application data.
 
-## 5. Deploy to GitHub Pages
+## Suggested next features
 
-Upload these files to a repository and enable GitHub Pages for the branch/folder containing `index.html`.
-
-## Important privacy/security note
-
-This is a private-room chat application, but it is **not end-to-end encrypted like Signal**. Supabase/database administrators can technically access stored messages and public image URLs.
-
-For a production app, consider:
-- email/OAuth accounts instead of anonymous accounts
-- stronger abuse/rate-limit controls
-- private Supabase Storage buckets with signed URLs
-- message deletion/editing
-- blocking/reporting
-- end-to-end encryption if you need true message confidentiality
-- moderation and file scanning
-
-Anonymous accounts also mean users can lose access if their browser/session is lost. For a serious production service, add a real account/recovery method.
-
-## Project files
-
-- `index.html` — app UI
-- `style.css` — responsive dark UI
-- `app.js` — chat logic
-- `supabase.sql` — database, RLS, storage and helper functions
+- typing indicator
+- online/offline presence
+- read receipts
+- reactions
+- reply/quote messages
+- edit/delete messages
+- block/report users
+- profile photos
+- push notifications
+- rate limiting/anti-spam
+- automatic deletion of expired media
+- end-to-end encryption
